@@ -25,17 +25,9 @@ def processCommandsWithInfoTrees
 
   pure (s, msgs, trees)
 
-/--
-Process some text input, with or without an existing command state.
-If there is no existing environment, we parse the input for headers (e.g. import statements),
-and create a new environment.
-Otherwise, we add to the existing environment.
-
-Returns the resulting command state, along with a list of messages and info trees.
--/
-def processInput (input : String) (cmdState? : Option Command.State)
+unsafe def processInputAux (input : String) (cmdState? : Option Command.State)
     (opts : Options := {}) (fileName : Option String := none) :
-    IO (Command.State × List Message × List InfoTree) := unsafe do
+    IO (Command.State × List Message × List InfoTree) := do
   Lean.initSearchPath (← Lean.findSysroot)
   enableInitializersExecution
   let fileName   := fileName.getD "<input>"
@@ -48,3 +40,16 @@ def processInput (input : String) (cmdState? : Option Command.State)
   | some cmdState => do
     pure ({ : Parser.ModuleParserState }, cmdState)
   processCommandsWithInfoTrees inputCtx parserState commandState
+
+/--
+Process some text input, with or without an existing command state.
+If there is no existing environment, we parse the input for headers (e.g. import statements),
+and create a new environment.
+Otherwise, we add to the existing environment.
+
+Returns the resulting command state, along with a list of messages and info trees.
+-/
+@[implemented_by processInputAux]
+opaque processInput (input : String) (cmdState? : Option Command.State)
+    (opts : Options := {}) (fileName : Option String := none) :
+    IO (Command.State × List Message × List InfoTree)
