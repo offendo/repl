@@ -78,14 +78,10 @@ open PrettyPrinter Delaborator SubExpr
 open Lean.Parser.Term
 
 open TSyntax.Compat in
-partial def delabConstWithSignature' (universes : Bool := true) : Delab := do
+partial def delabSignature' (idStx : Ident) (universes : Bool := true) : Delab := do
   let e ← getExpr
-  -- use virtual expression node of arity 2 to separate name and type info
-  let idStx ← descend e 0 <|
-    withOptions (pp.universes.set · universes |> (pp.fullNames.set · true)) <|
-      delabConst
   descend (← inferType e) 1 <|
-    delabParams {} idStx #[]
+    delabParams {} #[]
 where
   /--
   For types in the signature, we want to be sure pi binder types are pretty printed.
@@ -97,7 +93,7 @@ where
   Once it reaches a binder with an inaccessible name, or a name that has already been used,
   the remaining binders appear in pi types after the `:` of the declaration.
   -/
-  delabParams (bindingNames : NameSet) (idStx : Ident) (groups : TSyntaxArray ``bracketedBinder) := do
+  delabParams (bindingNames : NameSet) (groups : TSyntaxArray ``bracketedBinder) := do
     let e ← getExpr
     if e.isForall && e.binderInfo.isInstImplicit && e.bindingName!.hasMacroScopes then
       -- Assumption: this instance can be found by instance search, so it does not need to be named.
@@ -105,9 +101,9 @@ where
       -- We could check to see whether the instance appears in the type and avoid omitting the instance name,
       -- but this would be the usual case.
       let group ← withBindingDomain do `(bracketedBinderF|[$(← delabTy)])
-      withBindingBody e.bindingName! <| delabParams bindingNames idStx (groups.push group)
+      withBindingBody e.bindingName! <| delabParams bindingNames (groups.push group)
     else if e.isForall && !e.bindingName!.hasMacroScopes && !bindingNames.contains e.bindingName! then
-      delabParamsAux bindingNames idStx groups #[]
+      delabParamsAux bindingNames groups #[]
     else
       let type ← delabTy
       `(declSigWithId| $idStx:ident $groups* : $type)
@@ -118,13 +114,13 @@ where
   - It has a name that's not inaccessible.
   - It has a name that hasn't been used yet.
   -/
-  delabParamsAux (bindingNames : NameSet) (idStx : Ident) (groups : TSyntaxArray ``bracketedBinder) (curIds : Array Ident) := do
+  delabParamsAux (bindingNames : NameSet) (groups : TSyntaxArray ``bracketedBinder) (curIds : Array Ident) := do
     let e@(.forallE n d e' i) ← getExpr | unreachable!
     let bindingNames := bindingNames.insert n
     let stxN := mkIdent n
     let curIds := curIds.push ⟨stxN⟩
     if shouldGroupWithNext bindingNames e e' then
-      withBindingBody n <| delabParamsAux bindingNames idStx groups curIds
+      withBindingBody n <| delabParamsAux bindingNames groups curIds
     else
       let group ← withBindingDomain do
         match i with
@@ -139,7 +135,7 @@ where
             `(bracketedBinderF|($curIds* : $(← withAppFn <| withAppArg delabTy) := by $tacticSyntax))
           else
             `(bracketedBinderF|($curIds* : $(← delabTy)))
-      withBindingBody n <| delabParams bindingNames idStx (groups.push group)
+      withBindingBody n <| delabParams bindingNames (groups.push group)
   /-
   Given the forall `e` with body `e'`, determines if the binder from `e'` (if it is a forall) should be grouped with `e`'s binder.
   -/
@@ -154,11 +150,9 @@ where
     -- Inst implicits can't be grouped:
     e'.binderInfo != BinderInfo.instImplicit
 
-/-- Pretty-prints a declaration `c` as `c <params> : <type>`. -/
-def ppSignature' (c : Name) : MetaM FormatWithInfos := do
-  let decl ← getConstInfo c
-  let e := .const c (decl.levelParams.map mkLevelParam)
-  let (stx, infos) ← delabCore e (delab := delabConstWithSignature' (universes := false))
+/-- Pretty-prints type of `e` as a signature `idStx <params> : <type>`. -/
+def ppSignature' (idStx : Ident) (e : Expr) : MetaM FormatWithInfos := do
+  let (stx, infos) ← delabCore e (delab := delabSignature' idStx (universes := false))
   return ⟨← ppTerm ⟨stx⟩, infos⟩  -- HACK: not a term
 
 /--
@@ -186,14 +180,9 @@ def extractGoal (g : MVarId) (cleanup := false) (name? : Option Name := none) : 
     let ty ← instantiateMVars (← g.getType)
     let initLevels := (collectLevelParams {} ty).params
     let ty ← Term.TermElabM.run' (s := {levelNames := initLevels.reverse.toList}) do Term.levelMVarToParam ty
-    let levels := (collectLevelParams {} ty).params.reverse.toList
-    addAndCompile <| Declaration.axiomDecl
-      { name := name
-        levelParams := levels
-        isUnsafe := false
-        type := ty }
+    let e ← mkFreshExprMVar ty
     let sig ← addMessageContext <| MessageData.ofPPFormat { pp := fun
-                | some ctx => ctx.runMetaM <| ppSignature' name
+                | some ctx => ctx.runMetaM <| ppSignature' (mkIdent name) e
                 | none     => unreachable!
               }
     let cmd := if ← Meta.isProp ty then "theorem" else "def"
