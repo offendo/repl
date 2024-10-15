@@ -101,15 +101,17 @@ structure Tactic where
   pos : Pos
   endPos : Pos
   goals : String
+  extracted : Array String
   tactic : String
   proofState : Option Nat
 deriving ToJson, FromJson
 
 /-- Construct the JSON representation of a Lean tactic. -/
-def Tactic.of (goals tactic : String) (pos endPos : Lean.Position) (proofState : Option Nat) : Tactic :=
+def Tactic.of (goals tactic : String) (extracted : Array String) (pos endPos : Lean.Position) (proofState : Option Nat) : Tactic :=
   { pos := ⟨pos.line, pos.column⟩,
     endPos := ⟨endPos.line, endPos.column⟩,
     goals,
+    extracted,
     tactic,
     proofState }
 
