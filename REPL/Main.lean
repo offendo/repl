@@ -157,8 +157,8 @@ def tactics (trees : List InfoTree) : M m (List Tactic) :=
           let goal' ←
             try
               REPL.Util.extractGoal goal (cleanup := false)
-            catch _ =>
-              pure "failed"
+            catch ex =>
+              pure s!"failed: {← ex.toMessageData.toString}"
           extracted := extracted.push (← goal'.toString)
         pure extracted
       let tactic := Format.pretty (← ppTactic ctx stx)

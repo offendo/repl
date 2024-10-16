@@ -173,10 +173,12 @@ def extractGoal (g : MVarId) (cleanup := false) (name? : Option Name := none) : 
     match name? with
     | some name => pure name
     | none => mkAuxName ((← getCurrNamespace) ++ `extracted) 1
-  withoutModifyingEnv <| withoutModifyingState do
+  withoutModifyingEnv <| withoutModifyingState <| do
     let g ← if cleanup then g.cleanup else pure g
     let (g, _) ← g.renameInaccessibleFVars
-    let (_, g) ← g.revert (clearAuxDeclsInsteadOfRevert := true) (← g.getDecl).lctx.getFVarIds
+    g.withContext do
+    let fvarIds ← (← g.getDecl).lctx.getFVarIds.filterM fun fvarId => return !(← fvarId.getDecl).isAuxDecl
+    let (_, g) ← g.revert (clearAuxDeclsInsteadOfRevert := true) fvarIds
     let ty ← instantiateMVars (← g.getType)
     let initLevels := (collectLevelParams {} ty).params
     let ty ← Term.TermElabM.run' (s := {levelNames := initLevels.reverse.toList}) do Term.levelMVarToParam ty
@@ -186,4 +188,4 @@ def extractGoal (g : MVarId) (cleanup := false) (name? : Option Name := none) : 
                 | none     => unreachable!
               }
     let cmd := if ← Meta.isProp ty then "theorem" else "def"
-    pure m!"{cmd} {sig} := sorry"
+    addMessageContext m!"{cmd} {sig} := sorry"
