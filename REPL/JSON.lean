@@ -87,7 +87,7 @@ instance : ToJson Sorry where
     [("goal", r.goal)],
     [("proofState", toJson r.proofState)],
     if r.pos.line ≠ 0 then [("pos", toJson r.pos)] else [],
-    if r.endPos.line ≠ 0 then [("endPos", toJson r.endPos)] else []
+    if r.endPos.line ≠ 0 then [("endPos", toJson r.endPos)] else [],
   ]
 
 /-- Construct the JSON representation of a Lean sorry. -/

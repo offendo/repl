@@ -21,7 +21,7 @@ later fvar with the same user name.
 def Lean.LocalContext.inaccessibleFVars (lctx : LocalContext) :
     Array LocalDecl :=
   let (result, _) :=
-    lctx.foldr (β := Array LocalDecl × HashSet Name)
+    lctx.foldr (β := Array LocalDecl × Std.HashSet Name)
       (init := (Array.mkEmpty lctx.numIndices, {}))
       λ ldecl (result, seen) =>
         if ldecl.isImplementationDetail then
@@ -183,9 +183,10 @@ def extractGoal (g : MVarId) (cleanup := false) (name? : Option Name := none) : 
     let initLevels := (collectLevelParams {} ty).params
     let ty ← Term.TermElabM.run' (s := {levelNames := initLevels.reverse.toList}) do Term.levelMVarToParam ty
     let e ← mkFreshExprMVar ty
-    let sig ← addMessageContext <| MessageData.ofPPFormat { pp := fun
-                | some ctx => ctx.runMetaM <| ppSignature' (mkIdent name) e
-                | none     => unreachable!
-              }
+    let sig ← addMessageContext <| MessageData.lazy fun ctx => MessageData.ofFormatWithInfos <$> (ctx.runMetaM <| ppSignature' (mkIdent name) e)
+    -- let sig ← addMessageContext <| MessageData.ofFormatWithInfos { pp := fun
+    --             | some ctx => ctx.runMetaM <| ppSignature' (mkIdent name) e
+    --             | none     => unreachable!
+    --           }
     let cmd := if ← Meta.isProp ty then "theorem" else "def"
     addMessageContext m!"{cmd} {sig} := sorry"

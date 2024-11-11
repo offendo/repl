@@ -58,37 +58,6 @@ The results are of the form
 
 open Lean Elab
 
-namespace Lean.Elab
-structure CommandContextInfo where
-  env           : Environment
-  fileMap       : FileMap
-  mctx          : MetavarContext := {}
-  options       : Options        := {}
-  currNamespace : Name           := Name.anonymous
-  openDecls     : List OpenDecl  := []
-  ngen          : NameGenerator -- We must save the name generator to implement `ContextInfo.runMetaM` and making we not create `MVarId`s used in `mctx`.
-
-namespace CommandContextInfo
-
-variable [Monad m] [MonadEnv m] [MonadMCtx m] [MonadOptions m] [MonadResolveName m] [MonadNameGenerator m]
-
-def saveNoFileMap : m CommandContextInfo := return {
-    env           := (← getEnv)
-    fileMap       := default
-    mctx          := (← getMCtx)
-    options       := (← getOptions)
-    currNamespace := (← getCurrNamespace)
-    openDecls     := (← getOpenDecls)
-    ngen          := (← getNGen)
-  }
-
-def save [MonadFileMap m] : m CommandContextInfo := do
-  let ctx ← saveNoFileMap
-  return { ctx with fileMap := (← getFileMap) }
-
-end CommandContextInfo
-end Lean.Elab
-
 namespace REPL
 
 /-- The monadic state for the Lean REPL. -/
@@ -178,7 +147,7 @@ def createProofStepReponse (proofState : ProofSnapshot) (old? : Option ProofSnap
   let trees ← match old? with
   | some old => do
     let (ctx, _) ← old.runMetaM do return { ← CommandContextInfo.save with }
-    --let ctx := PartialContextInfo.commandCtx ctx
+    let ctx := PartialContextInfo.commandCtx ctx
     pure <| trees.map fun t => InfoTree.context ctx t
   | none => pure trees
   -- For debugging purposes, sometimes we print out the trees here:
@@ -218,10 +187,10 @@ def pickleProofSnapshot (n : PickleProofState) : M m (ProofStepResponse ⊕ Erro
 /-- Unpickle a `ProofSnapshot`, generating a JSON response. -/
 def unpickleProofSnapshot (n : UnpickleProofState) : M IO (ProofStepResponse ⊕ Error) := do
   let (cmdSnapshot?, notFound) ← do match n.env with
-  | none => pure (none, false)
-  | some i => do match (← get).cmdStates[i]? with
-    | some env => pure (some env, false)
-    | none => pure (none, true)
+    | none => pure (none, false)
+    | some i => do match (← get).cmdStates[i]? with
+      | some env => pure (some env, false)
+      | none => pure (none, true)
   if notFound then
     return .inr ⟨"Unknown environment."⟩
   let (proofState, _) ← ProofSnapshot.unpickle n.unpickleProofStateFrom cmdSnapshot?
@@ -231,35 +200,33 @@ def unpickleProofSnapshot (n : UnpickleProofState) : M IO (ProofStepResponse ⊕
 Run a command, returning the id of the new environment, and any messages and sorries.
 -/
 def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
-  let (cmdSnapshot?, notFound) ← do
-    match s.env with
+  let (cmdSnapshot?, notFound) ← do match s.env with
     | none => pure (none, false)
-    | some i =>
-      match (← get).cmdStates[i]? with
+    | some i => do match (← get).cmdStates[i]? with
       | some env => pure (some env, false)
       | none => pure (none, true)
   if notFound then
     return .inr ⟨"Unknown environment."⟩
   let initialCmdState? := cmdSnapshot?.map fun c => c.cmdState
-  let (cmdState, messages, trees) ←
-    try
-      IO.processInput s.cmd initialCmdState?
-    catch ex =>
-      return .inr ⟨ex.toString⟩
+  let (cmdState, messages, trees) ← try
+    IO.processInput s.cmd initialCmdState?
+  catch ex =>
+    return .inr ⟨ex.toString⟩
   let messages ← messages.mapM fun m => Message.of m
   -- For debugging purposes, sometimes we print out the trees here:
   -- trees.forM fun t => do IO.println (← t.format)
   let sorries ← sorries trees (initialCmdState?.map (·.env))
-  let tactics ←
-    match s.allTactics with
-    | some true => tactics trees
-    | _ => pure []
+  let tactics ← match s.allTactics with
+  | some true => tactics trees
+  | _ => pure []
   let cmdSnapshot :=
-    { cmdState
-      cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
-        { fileName := "",
-          fileMap := default,
-          tacticCache? := none } }
+  { cmdState
+    cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
+      { fileName := "",
+        fileMap := default,
+        tacticCache? := none,
+        snap? := none,
+        cancelTk? := none } }
   let env ← recordCommandSnapshot cmdSnapshot
   let jsonTrees := match s.infotree with
   | some "full" => trees
