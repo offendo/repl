@@ -3,7 +3,7 @@ Copyright (c) 2023 Lean FRO, LLC. All rights reserved.
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Scott Morrison
 -/
-import Lean.Replay
+import REPL.Lean.Replay
 import Lean.Elab.Command
 import REPL.Util.Pickle
 
@@ -76,10 +76,7 @@ def pickle (p : CommandSnapshot) (path : FilePath) : IO Unit := do
      ({ p'.cmdState with } : CompactableCommandSnapshot),
      p'.cmdContext)
 
-/--
-Unpickle a `CommandSnapshot`.
--/
-def unpickle (path : FilePath) : IO (CommandSnapshot × CompactedRegion) := unsafe do
+unsafe def unpickleAux (path : FilePath) : IO (CommandSnapshot × CompactedRegion) := do
   let ((imports, map₂, cmdState, cmdContext), region) ←
     _root_.unpickle (Array Import × PHashMap Name ConstantInfo × CompactableCommandSnapshot ×
       Command.Context) path
@@ -92,6 +89,12 @@ def unpickle (path : FilePath) : IO (CommandSnapshot × CompactedRegion) := unsa
       if let .simple ns _ := o then do
         activateScoped ns
   return (p'', region)
+
+/--
+Unpickle a `CommandSnapshot`.
+-/
+@[implemented_by unpickleAux]
+opaque unpickle (path : FilePath) : IO (CommandSnapshot × CompactedRegion)
 
 end CommandSnapshot
 
@@ -271,11 +274,8 @@ def pickle (p : ProofSnapshot) (path : FilePath) : IO Unit := do
      p'.tacticState,
      p'.tacticContext)
 
-/--
-Unpickle a `ProofSnapshot`.
--/
-def unpickle (path : FilePath) (cmd? : Option CommandSnapshot) :
-    IO (ProofSnapshot × CompactedRegion) := unsafe do
+unsafe def unpickleAux (path : FilePath) (cmd? : Option CommandSnapshot) :
+    IO (ProofSnapshot × CompactedRegion) := do
   let ((imports, map₂, coreState, coreContext, metaState, metaContext, termState, termContext,
     tacticState, tacticContext), region) ←
     _root_.unpickle (Array Import × PHashMap Name ConstantInfo × CompactableCoreState ×
@@ -301,5 +301,12 @@ def unpickle (path : FilePath) (cmd? : Option CommandSnapshot) :
       if let .simple ns _ := o then
         activateScoped ns
   return (p'', region)
+
+/--
+Unpickle a `ProofSnapshot`.
+-/
+@[implemented_by unpickleAux]
+opaque unpickle (path : FilePath) (cmd? : Option CommandSnapshot) :
+    IO (ProofSnapshot × CompactedRegion)
 
 end ProofSnapshot

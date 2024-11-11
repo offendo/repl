@@ -13,13 +13,18 @@ By abusing `saveModuleData` and `readModuleData` we can pickle and unpickle obje
 
 open Lean System
 
+private unsafe def unsafeCastToModuleDataImpl (x : α) : ModuleData := unsafeCast x
+
+@[implemented_by unsafeCastToModuleDataImpl]
+private opaque unsafeCastToModuleData (x : α) : ModuleData
+
 /--
 Save an object to disk.
 If you need to write multiple objects from within a single declaration,
 you will need to provide a unique `key` for each.
 -/
 def pickle {α : Type} (path : FilePath) (x : α) (key : Name := by exact decl_name%) : IO Unit :=
-  saveModuleData path key (unsafe unsafeCast x)
+  saveModuleData path key (unsafeCastToModuleData x)
 
 /--
 Load an object from disk.

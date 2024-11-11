@@ -1,5 +1,5 @@
 import REPL.Util.Pickle
-import Lean.Replay
+import REPL.Lean.Replay
 
 open System (FilePath)
 
@@ -16,6 +16,11 @@ and then add the new constants.
 -/
 def pickle (env : Environment) (path : FilePath) : IO Unit :=
   _root_.pickle path (env.header.imports, env.constants.map₂)
+
+unsafe def unpickleAux (path : FilePath) : IO (Environment × CompactedRegion) := do
+  let ((imports, map₂), region) ← _root_.unpickle (Array Import × PHashMap Name ConstantInfo) path
+  let env ← importModules imports {} 0
+  return (← env.replay (HashMap.ofList map₂.toList), region)
 
 /--
 Unpickle an `Environment` from disk.

@@ -87,7 +87,7 @@ instance : ToJson Sorry where
     [("goal", r.goal)],
     [("proofState", toJson r.proofState)],
     if r.pos.line ≠ 0 then [("pos", toJson r.pos)] else [],
-    if r.endPos.line ≠ 0 then [("endPos", toJson r.endPos)] else [],
+    if r.endPos.line ≠ 0 then [("endPos", toJson r.endPos)] else []
   ]
 
 /-- Construct the JSON representation of a Lean sorry. -/
@@ -101,16 +101,18 @@ structure Tactic where
   pos : Pos
   endPos : Pos
   goals : String
+  extracted : Array String
   tactic : String
   proofState : Option Nat
   usedConstants : Array Name
 deriving ToJson, FromJson
 
 /-- Construct the JSON representation of a Lean tactic. -/
-def Tactic.of (goals tactic : String) (pos endPos : Lean.Position) (proofState : Option Nat) (usedConstants : Array Name) : Tactic :=
+def Tactic.of (goals tactic : String) (extracted : Array String) (pos endPos : Lean.Position) (proofState : Option Nat) (usedConstants : Array Name): Tactic :=
   { pos := ⟨pos.line, pos.column⟩,
     endPos := ⟨endPos.line, endPos.column⟩,
     goals,
+    extracted,
     tactic,
     proofState,
     usedConstants }
@@ -121,6 +123,7 @@ A response to a Lean command.
 -/
 structure CommandResponse where
   env : Nat
+  commandState : String := ""
   messages : List Message := []
   sorries : List Sorry := []
   tactics : List Tactic := []
@@ -133,7 +136,7 @@ def Json.nonemptyList [ToJson α] (k : String) : List α → List (String × Jso
 
 instance : ToJson CommandResponse where
   toJson r := Json.mkObj <| .flatten [
-    [("env", r.env)],
+    [("env", r.env), ("commandState", r.commandState)],
     Json.nonemptyList "messages" r.messages,
     Json.nonemptyList "sorries" r.sorries,
     Json.nonemptyList "tactics" r.tactics,

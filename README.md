@@ -1,5 +1,13 @@
 # A read-eval-print-loop for Lean 4
 
+**Note:** This version backported specifically for Mathlib commit
+926c0c5f20491ed64320fa1067d8cba516740647.
+
+Example:
+```
+echo '{"path": "MiniF2F/Validation.lean", "allTactics": false}' | lake env ../repl/build/bin/repl > out.txt
+```
+
 Run using `lake exe repl`.
 Communicates via JSON on stdin and stdout.
 Commands should be separated by blank lines.
