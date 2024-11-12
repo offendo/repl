@@ -78,7 +78,7 @@ open PrettyPrinter Delaborator SubExpr
 open Lean.Parser.Term
 
 open TSyntax.Compat in
-partial def delabSignature' (idStx : Ident) (universes : Bool := true) : Delab := do
+partial def delabSignature' (idStx : Ident)  : Delab := do
   let e ← getExpr
   descend (← inferType e) 1 <|
     delabParams {} #[]
@@ -152,7 +152,7 @@ where
 
 /-- Pretty-prints type of `e` as a signature `idStx <params> : <type>`. -/
 def ppSignature' (idStx : Ident) (e : Expr) : MetaM FormatWithInfos := do
-  let (stx, infos) ← delabCore e (delab := delabSignature' idStx (universes := false))
+  let (stx, infos) ← delabCore e (delab := delabSignature' idStx )
   return ⟨← ppTerm ⟨stx⟩, infos⟩  -- HACK: not a term
 
 /--
