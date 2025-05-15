@@ -33,10 +33,3 @@ def runWithTimeout
       | Except.ok val => return val
         -- TODO: Not sure how to throw error here properly; should basically never happen
       | Except.error err => return Sum.inr err.toString
-
-def fast := fun () => IO.lazyPure (fun () => 5 + 5)
-def slow (a : Unit) := do
-   let x := (IO.sleep 10000)
-   BaseIO.toIO x
-
-#eval runWithTimeout slow 4
