@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Scott Morrison
 -/
 import Lean.Elab.Frontend
+import REPL.Timeout
 
 open Lean Elab
 
@@ -55,3 +56,11 @@ def processInput (input : String) (cmdState? : Option Command.State)
     let parserState : Parser.ModuleParserState := {}
     let (cmdStateAfter, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState cmdStateBefore
     return (cmdStateBefore, cmdStateAfter, messages, trees)
+
+def processInputWithTimeout (timeout : Seconds) (input : String) (cmdState? : Option Command.State)
+    (opts : Options := {}) (fileName : Option String := none) :
+    IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
+    do
+      let func := fun () => processInput input cmdState? opts fileName
+      let result <- runWithTimeout func timeout Task.Priority.dedicated
+      return result

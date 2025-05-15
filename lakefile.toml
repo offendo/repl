@@ -4,6 +4,10 @@ defaultTargets = ["repl"]
 [[lean_lib]]
 name = "REPL"
 
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+
 [[lean_exe]]
 name = "repl"
 root = "REPL.Main"

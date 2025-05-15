@@ -19,6 +19,7 @@ structure CommandOptions where
   Anything else is ignored.
   -/
   infotree : Option String
+  timeout : Option Nat
 
 /-- Run Lean commands.
 If `env = none`, starts a new session (in which you can use `import`).

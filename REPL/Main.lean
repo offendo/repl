@@ -292,7 +292,7 @@ def unpickleProofSnapshot (n : UnpickleProofState) : M IO (ProofStepResponse ⊕
 /--
 Run a command, returning the id of the new environment, and any messages and sorries.
 -/
-def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
+def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
   let (cmdSnapshot?, notFound) ← do match s.env with
   | none => pure (none, false)
   | some i => do match (← get).cmdStates[i]? with
@@ -301,8 +301,16 @@ def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
   if notFound then
     return .inr ⟨"Unknown environment."⟩
   let initialCmdState? := cmdSnapshot?.map fun c => c.cmdState
-  let (initialCmdState, cmdState, messages, trees) ← try
-    IO.processInput s.cmd initialCmdState?
+  let (initialCmdState, cmdState, messages, trees) ← try (
+    do
+      match s.timeout with
+        | some timeout =>
+        let result <- IO.processInputWithTimeout timeout s.cmd initialCmdState?
+        match result with
+          | Sum.inl val => return val
+          | Sum.inr err => throw err
+        | none  => IO.processInput  s.cmd initialCmdState?
+  )
   catch ex =>
     return .inr ⟨ex.toString⟩
   let messages ← messages.mapM fun m => Message.of m
@@ -343,7 +351,7 @@ def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
 def processFile (s : File) : M IO (CommandResponse ⊕ Error) := do
   try
     let cmd ← IO.FS.readFile s.path
-    runCommand { s with env := none, cmd }
+    runCommandWithTimeout { s with env := none, cmd }
   catch e =>
     pure <| .inr ⟨e.toString⟩
 
@@ -426,7 +434,7 @@ where loop : M IO Unit := do
     return ()
   if query.startsWith "#" || query.startsWith "--" then loop else
   IO.println <| toString <| ← match ← parse query with
-  | .command r => return toJson (← runCommand r)
+  | .command r => return toJson (← runCommandWithTimeout r)
   | .file r => return toJson (← processFile r)
   | .proofStep r => return toJson (← runProofStep r)
   | .pickleEnvironment r => return toJson (← pickleCommandSnapshot r)
