@@ -1,5 +1,4 @@
 import Init.Prelude
-import Mathlib.Data.Nat.Basic
 import Lean
 
 open Task Lean.Elab
