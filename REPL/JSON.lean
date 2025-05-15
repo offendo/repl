@@ -13,7 +13,6 @@ namespace REPL
 
 structure CommandOptions where
   allTactics : Option Bool := none
-  rootGoals : Option Bool := none
   /--
   Should be "full", "tactics", "original", or "substantive".
   Anything else is ignored.
@@ -152,7 +151,6 @@ structure ProofStepResponse where
   messages : List Message := []
   sorries : List Sorry := []
   traces : List String
-  proofStatus : String
 deriving ToJson, FromJson
 
 instance : ToJson ProofStepResponse where
@@ -161,8 +159,7 @@ instance : ToJson ProofStepResponse where
     [("goals", toJson r.goals)],
     Json.nonemptyList "messages" r.messages,
     Json.nonemptyList "sorries" r.sorries,
-    Json.nonemptyList "traces" r.traces,
-    [("proofStatus", r.proofStatus)]
+    Json.nonemptyList "traces" r.traces
   ]
 
 /-- Json wrapper for an error. -/

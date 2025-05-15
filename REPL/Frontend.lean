@@ -37,29 +37,25 @@ Returns:
 -/
 def processInput (input : String) (cmdState? : Option Command.State)
     (opts : Options := {}) (fileName : Option String := none) :
-    IO (Command.State × Command.State × List Message × List InfoTree) := unsafe do
+    IO (Command.State × List Message × List InfoTree) := unsafe do
   Lean.initSearchPath (← Lean.findSysroot)
   enableInitializersExecution
   let fileName   := fileName.getD "<input>"
   let inputCtx   := Parser.mkInputContext input fileName
 
-  match cmdState? with
+  let (parserState, commandState) ← match cmdState? with
   | none => do
     -- Split the processing into two phases to prevent self-reference in proofs in tactic mode
     let (header, parserState, messages) ← Parser.parseHeader inputCtx
     let (env, messages) ← processHeader header opts messages inputCtx
-    let headerOnlyState := Command.mkState env messages opts
-    let (cmdState, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState headerOnlyState
-    return (headerOnlyState, cmdState, messages, trees)
+    pure (parserState, (Command.mkState env messages opts))
+  | some cmdState => do
+    pure ({ : Parser.ModuleParserState }, cmdState)
+  processCommandsWithInfoTrees inputCtx parserState commandState
 
-  | some cmdStateBefore => do
-    let parserState : Parser.ModuleParserState := {}
-    let (cmdStateAfter, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState cmdStateBefore
-    return (cmdStateBefore, cmdStateAfter, messages, trees)
-
-def processInputWithTimeout (timeout : Seconds) (input : String) (cmdState? : Option Command.State)
+def processInputWithTimeout (timeout : Nat) (input : String) (cmdState? : Option Command.State)
     (opts : Options := {}) (fileName : Option String := none) :
-    IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
+    IO ((Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
     do
       let func := fun () => processInput input cmdState? opts fileName
       let result <- runWithTimeout func timeout Task.Priority.dedicated
