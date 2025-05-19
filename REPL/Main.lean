@@ -11,6 +11,7 @@ import REPL.Lean.Environment
 import REPL.Lean.InfoTree
 import REPL.Lean.InfoTree.ToJson
 import REPL.Snapshots
+import Socket
 
 /-!
 # A REPL for Lean.
@@ -375,6 +376,7 @@ open REPL
 
 /-- Get lines from stdin until a blank line is entered. -/
 partial def getLines : IO String := do
+  IO.print "λ "
   let line ← (← IO.getStdin).getLine
   if line.trim.isEmpty then
     return line
@@ -426,9 +428,16 @@ def printFlush [ToString α] (s : α) : IO Unit := do
   out.flush -- Flush the output
 
 /-- Read-eval-print loop for Lean. -/
-unsafe def repl : IO Unit :=
+unsafe def repl : IO Unit := do 
+  -- Print a little header
+  let header := s!"Lean REPL ({version})"
+  let underline := String.map (fun _ => '=') header
+  IO.println s!"{header}\n{underline}"
+  -- Now do the loop
   StateT.run' loop {}
-where loop : M IO Unit := do
+where 
+  version := "v4.20.0-rc5+thread"
+  loop : M IO Unit := do
   let query ← getLines
   if query = "" then
     return ()
@@ -444,7 +453,41 @@ where loop : M IO Unit := do
   printFlush "\n" -- easier to parse the output if there are blank lines
   loop
 
-/-- Main executable function, run as `lake exe repl`. -/
-unsafe def main (_ : List String) : IO Unit := do
-  initSearchPath (← Lean.findSysroot)
-  repl
+open Socket
+partial def tcpRepl (port : Nat) : IO Unit := do
+    let address ←  SockAddr.mk "localhost" (toString port) AddressFamily.inet SockType.stream
+    let socket ← Socket.mk AddressFamily.inet SockType.stream
+    socket.bind address
+    socket.listen 5
+    serve socket
+  where 
+    communicate (addr : SockAddr) (socket' : Socket) : M IO Unit := do
+      let query <- String.fromUTF8! <$> socket'.recv 65536
+      let tid ←  IO.getTID
+      match query.length with
+      -- End the server
+        | Nat.zero => do
+          let host := addr.host.getD "??"
+          let port := addr.port.getD 0
+          IO.println s!"Closing connection to {host}:{port}; ending thread {tid}"
+          socket'.close
+          return ()
+      -- Loop the server
+        | _ => do 
+          let response := toString <| ← match (← parse query) with
+            | .command r => return toJson (← runCommandWithTimeout r)
+            | .file r => return toJson (← processFile r)
+            | .proofStep r => return toJson (← runProofStep r)
+            | .pickleEnvironment r => return toJson (← pickleCommandSnapshot r)
+            | .unpickleEnvironment r => return toJson (← unpickleCommandSnapshot r)
+            | .pickleProofSnapshot r => return toJson (← pickleProofSnapshot r)
+            | .unpickleProofSnapshot r => return toJson (← unpickleProofSnapshot r)
+          let bytesSend ← socket'.send response.toUTF8
+          IO.println s!"Sent back {bytesSend} bytes"
+          communicate addr socket'
+    serve (socket : Socket) : IO Unit := do
+      repeat do
+        let (remoteAddr, socket') ←  socket.accept
+        IO.println s!"Connected to {remoteAddr}"
+        let _ ←  IO.asTask $ StateT.run' (communicate remoteAddr socket') {}
+
