@@ -482,9 +482,7 @@ partial def tcpRepl (port : Nat) : IO Unit := do
             | .unpickleEnvironment r => return toJson (← unpickleCommandSnapshot r)
             | .pickleProofSnapshot r => return toJson (← pickleProofSnapshot r)
             | .unpickleProofSnapshot r => return toJson (← unpickleProofSnapshot r)
-          let responseSize := response.length
-          let packet := s!"{responseSize}\n{response}".toUTF8
-          let bytesSend ← socket'.send packet
+          let bytesSend ← socket'.send response.toUTF8
           IO.println s!"Sent back {bytesSend} bytes"
           communicate addr socket'
     serve (socket : Socket) : IO Unit := do
