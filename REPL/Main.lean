@@ -330,7 +330,8 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
       { fileName := "",
         fileMap := default,
         snap? := none,
-        cancelTk? := none } }
+        cancelTk? := none 
+        tacticCache? := default } }
   let env ← recordCommandSnapshot cmdSnapshot
   let jsonTrees := match s.infotree with
   | some "full" => trees
