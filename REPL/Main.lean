@@ -306,7 +306,7 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
     do
       match s.timeout with
         | some timeout =>
-        let result <- IO.processInputWithTimeout timeout s.cmd initialCmdState?
+        let result <- IO.processInputWithTimeout (UInt32.ofNat timeout) s.cmd initialCmdState?
         match result with
           | Sum.inl val => return val
           | Sum.inr err => throw err
@@ -459,6 +459,7 @@ partial def tcpRepl (port : Nat) : IO Unit := do
     let socket ← Socket.mk AddressFamily.inet SockType.stream
     socket.bind address
     socket.listen 5
+    IO.println s!"Started TCP server; listening on port {port}"
     serve socket
   where 
     communicate (addr : SockAddr) (socket' : Socket) : M IO Unit := do

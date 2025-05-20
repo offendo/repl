@@ -16,7 +16,7 @@ scope = "leanprover"
 [[require]]
 name = "Socket"
 git = "https://github.com/offendo/Socket.lean"
-rev = "main"
+rev = "v4.20.0-rc5"
 
 [[lean_exe]]
 name = "repl"

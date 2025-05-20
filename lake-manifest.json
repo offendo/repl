@@ -8,7 +8,7 @@
    "rev": "25d055d0aaa120d56ce37218172a46239f821902",
    "name": "Socket",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "main",
+   "inputRev": "v4.20.0-rc5",
    "inherited": false,
    "configFile": "lakefile.lean"},
   {"url": "https://github.com/leanprover/lean4-cli",

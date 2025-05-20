@@ -57,7 +57,7 @@ def processInput (input : String) (cmdState? : Option Command.State)
     let (cmdStateAfter, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState cmdStateBefore
     return (cmdStateBefore, cmdStateAfter, messages, trees)
 
-def processInputWithTimeout (timeout : Seconds) (input : String) (cmdState? : Option Command.State)
+def processInputWithTimeout (timeout : UInt32) (input : String) (cmdState? : Option Command.State)
     (opts : Options := {}) (fileName : Option String := none) :
     IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
     do

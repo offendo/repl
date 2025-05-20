@@ -1,14 +1,12 @@
 import Init.Prelude
-import Mathlib.Data.Nat.Basic
 import Lean
 
 open Task Lean.Elab
 
-abbrev Seconds := Nat
 
 def runWithTimeout
   (func : Unit → IO β)
-  (timeout : Seconds)
+  (timeout : UInt32)
   (prio : Task.Priority := Task.Priority.default) : BaseIO (β ⊕ IO.Error) :=
   do
     -- Launch a timer function to run in a separate thread
