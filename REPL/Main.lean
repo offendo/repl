@@ -315,24 +315,31 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
   catch ex =>
     return .inr ⟨ex.toString⟩
   let messages ← messages.mapM fun m => Message.of m
+  let messages := match s.keepEnv with
+    | some false => let msg :=  "Did not return new enviroment; returning env 0 but didn't actually make one"
+                   (Message.mk (Pos.mk 0 0) none Severity.warning msg) :: messages
+    | _          => messages
   -- For debugging purposes, sometimes we print out the trees here:
   -- trees.forM fun t => do IO.println (← t.format)
   let sorries ← sorries trees initialCmdState.env none
   let sorries ← match s.rootGoals with
-  | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
-  | _ => pure sorries
+    | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
+    | _ => pure sorries
   let tactics ← match s.allTactics with
   | some true => tactics trees initialCmdState.env
   | _ => pure []
-  let cmdSnapshot :=
-  { cmdState
-    cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
-      { fileName := "",
-        fileMap := default,
-        snap? := none,
-        cancelTk? := none 
-        tacticCache? := default } }
-  let env ← recordCommandSnapshot cmdSnapshot
+    let cmdSnapshot :=
+      { cmdState
+        cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
+          { fileName := "",
+            fileMap := default,
+            snap? := none,
+            cancelTk? := none
+            tacticCache? := default } }
+  let env ← match s.keepEnv with
+    | some false => pure $ s.env.getD 0
+    | _          => (recordCommandSnapshot cmdSnapshot)
+
   let jsonTrees := match s.infotree with
   | some "full" => trees
   | some "tactics" => trees.flatMap InfoTree.retainTacticInfo
@@ -429,15 +436,15 @@ def printFlush [ToString α] (s : α) : IO Unit := do
   out.flush -- Flush the output
 
 /-- Read-eval-print loop for Lean. -/
-unsafe def repl : IO Unit := do 
+unsafe def repl : IO Unit := do
   -- Print a little header
+  let version := List.getLast! <| String.splitOn ((<- IO.getEnv "ELAN_TOOLCHAIN").getD "unknown:unknown") ":"
   let header := s!"Lean REPL ({version})"
   let underline := String.map (fun _ => '=') header
   IO.println s!"{header}\n{underline}"
   -- Now do the loop
   StateT.run' loop {}
-where 
-  version := "v4.20.0-rc5+thread"
+where
   loop : M IO Unit := do
   let query ← getLines
   if query = "" then
@@ -462,7 +469,7 @@ partial def tcpRepl (port : Nat) : IO Unit := do
     socket.listen 5
     IO.println s!"Started TCP server; listening on port {port}"
     serve socket
-  where 
+  where
     communicate (addr : SockAddr) (socket' : Socket) : M IO Unit := do
       let query <- String.fromUTF8! <$> socket'.recv 65536
       let tid ←  IO.getTID
@@ -475,7 +482,7 @@ partial def tcpRepl (port : Nat) : IO Unit := do
           socket'.close
           return ()
       -- Loop the server
-        | _ => do 
+        | _ => do
           let response := toString <| ← match (← parse query) with
             | .command r => return toJson (← runCommandWithTimeout r)
             | .file r => return toJson (← processFile r)
@@ -491,5 +498,4 @@ partial def tcpRepl (port : Nat) : IO Unit := do
       repeat do
         let (remoteAddr, socket') ←  socket.accept
         IO.println s!"Connected to {remoteAddr}"
-        let _ ←  IO.asTask $ StateT.run' (communicate remoteAddr socket') {}
-
+        let _ ←  IO.asTask (StateT.run' (communicate remoteAddr socket') {}) (Task.Priority.dedicated)

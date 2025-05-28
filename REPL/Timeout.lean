@@ -23,8 +23,7 @@ def runWithTimeout
     let result <- IO.waitAny [timer, job]
 
     -- Cancel the timer manually if it's still going
-    let timerDone <- IO.hasFinished timer
-    if not timerDone then IO.cancel timer
+    if not (<- IO.hasFinished timer) then IO.cancel timer
 
     -- Return the result
     match result with

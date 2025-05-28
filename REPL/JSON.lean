@@ -28,6 +28,8 @@ If `env = some n`, builds on the existing environment `n`.
 structure Command extends CommandOptions where
   env : Option Nat
   cmd : String
+  keepEnv: Option Bool := some true
+
 deriving ToJson, FromJson
 
 /-- Process a Lean file in a fresh environment. -/
