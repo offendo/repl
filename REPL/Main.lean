@@ -321,21 +321,27 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
     | _          => messages
   -- For debugging purposes, sometimes we print out the trees here:
   -- trees.forM fun t => do IO.println (← t.format)
-  let sorries ← sorries trees initialCmdState.env none
-  let sorries ← match s.rootGoals with
-    | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
-    | _ => pure sorries
-  let tactics ← match s.allTactics with
-  | some true => tactics trees initialCmdState.env
-  | _ => pure []
-    let cmdSnapshot :=
-      { cmdState
-        cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
-          { fileName := "",
-            fileMap := default,
-            snap? := none,
-            cancelTk? := none
-            tacticCache? := default } }
+  let sorries ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let sorries ← sorries trees initialCmdState.env none
+      let sorries ← match s.rootGoals with
+        | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
+        | _ => pure sorries
+  let tactics ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let tactics ← match s.allTactics with
+      | some true => tactics trees initialCmdState.env
+      | _ => pure []
+  let cmdSnapshot :=
+    { cmdState
+      cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
+        { fileName := "",
+          fileMap := default,
+          snap? := none,
+          cancelTk? := none
+          tacticCache? := default } }
   let env ← match s.keepEnv with
     | some false => pure $ s.env.getD 0
     | _          => (recordCommandSnapshot cmdSnapshot)

@@ -29,6 +29,7 @@ structure Command extends CommandOptions where
   env : Option Nat
   cmd : String
   keepEnv: Option Bool := some true
+  ignoreProofs : Option Bool := some false
 
 deriving ToJson, FromJson
 
