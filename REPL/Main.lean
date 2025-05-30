@@ -340,8 +340,7 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
         { fileName := "",
           fileMap := default,
           snap? := none,
-          cancelTk? := none
-          tacticCache? := default } }
+          cancelTk? := none } }
   let env ← match s.keepEnv with
     | some false => pure $ s.env.getD 0
     | _          => (recordCommandSnapshot cmdSnapshot)
