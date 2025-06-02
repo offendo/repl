@@ -64,3 +64,46 @@ def processInputWithTimeout (timeout : UInt32) (input : String) (cmdState? : Opt
       let func := fun () => processInput input cmdState? opts fileName
       let result <- runWithTimeout func timeout Task.Priority.dedicated
       return result
+
+@[export process_input_empty_state]
+def processInputEmptyState (input : String) : IO (Command.State × Command.State × List Message × List InfoTree) := unsafe do
+  Lean.initSearchPath (← Lean.findSysroot)
+  enableInitializersExecution
+  let opts : Options := {}
+  let fileName   := "<input>"
+  let inputCtx   := Parser.mkInputContext input fileName
+  -- Split the processing into two phases to prevent self-reference in proofs in tactic mode
+  let (header, parserState, messages) ← Parser.parseHeader inputCtx
+  let (env, messages) ← processHeader header opts messages inputCtx
+  let headerOnlyState := Command.mkState env messages opts
+
+  let (cmdState, messages, trees) ←  processCommandsWithInfoTrees inputCtx parserState headerOnlyState
+
+  return (headerOnlyState, cmdState, messages, trees)
+
+@[export process_input_from_state]
+def processInputFromState (input : String) (cmdState : Command.State) : IO (Command.State × Command.State × List Message × List InfoTree) := unsafe do
+  Lean.initSearchPath (← Lean.findSysroot)
+  enableInitializersExecution
+  let fileName   := "<input>"
+  let inputCtx   := Parser.mkInputContext input fileName
+
+  let parserState : Parser.ModuleParserState := {}
+  let (cmdStateAfter, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState cmdState
+  return (cmdState, cmdStateAfter, messages, trees)
+
+@[export process_input_with_timeout]
+def processInputWithTimeoutEmptyState (timeout : UInt32) (input : String) :
+    IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
+    do
+      let func := fun () => processInputEmptyState input 
+      let result <- runWithTimeout func timeout Task.Priority.dedicated
+      return result
+
+@[export process_input_with_timeout_from_state]
+def processInputWithTimeoutFromState (timeout : UInt32) (input : String) (cmdState : Command.State) :
+    IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
+    do
+      let func := fun () => processInputFromState input cmdState
+      let result <- runWithTimeout func timeout Task.Priority.dedicated
+      return result
