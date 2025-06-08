@@ -30,8 +30,7 @@ structure Command extends CommandOptions where
   cmd : String
   keepEnv: Option Bool := some true
   ignoreProofs : Option Bool := some false
-
-deriving ToJson, FromJson
+deriving FromJson, ToJson
 
 /-- Process a Lean file in a fresh environment. -/
 structure File extends CommandOptions where
@@ -131,6 +130,13 @@ structure CommandResponse where
   tactics : List Tactic := []
   infotree : Option Json := none
 deriving FromJson
+
+structure PyCommandResponse where
+  messages : List Message := []
+  sorries : List Sorry := []
+  tactics : List Tactic := []
+  infotree : Option Json := none
+deriving FromJson, ToJson
 
 def Json.nonemptyList [ToJson α] (k : String) : List α → List (String × Json)
   | [] => []

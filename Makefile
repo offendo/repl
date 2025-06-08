@@ -26,9 +26,9 @@ endif
 
 $(OUT_DIR)/main: main.c lake | $(OUT_DIR)
 # Add library paths for Lake package and for Lean itself
-	cc -g -o $@ $< -I $(LEAN_SYSROOT)/include -L $(LEAN_LIBDIR) -L .lake/build/lib -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS)
+	cc -O3 -o $@ $< -I $(LEAN_SYSROOT)/include -L $(LEAN_LIBDIR) -L .lake/build/lib -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS)
 
-run: $(OUT_DIR)/main
+run: build
 ifeq ($(OS),Windows_NT)
 # Add shared library paths to loader path dynamically
 	env PATH=".lake/build/lib:$(shell cygpath $(LEAN_SYSROOT))/bin:$(PATH)" $(OUT_DIR)/main
@@ -58,7 +58,7 @@ endif
 
 $(OUT_DIR)/main-local: main.c lake | $(OUT_DIR)
 	cp -f $(LEAN_SHLIB_ROOT)/*.$(SHLIB_EXT) .lake/build/lib/$(SHLIB_PREFIX)REPL.$(SHLIB_EXT) $(OUT_DIR)
-	cc -g -o $@ $< -I $(LEAN_SYSROOT)/include -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS_LOCAL)
+	cc -O3 -o $@ $< -I $(LEAN_SYSROOT)/include -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS_LOCAL)
 
-run-local: $(OUT_DIR)/main-local
+run-local: build-local
 	$(OUT_DIR)/main-local

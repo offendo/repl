@@ -298,7 +298,6 @@ def unpickleProofSnapshot (n : UnpickleProofState) : M IO (ProofStepResponse ⊕
 /--
 Run a command, returning the id of the new environment, and any messages and sorries.
 -/
-@[export run_command_with_timeout]
 def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
   let (cmdSnapshot?, notFound) ← do match s.env with
   | none => pure (none, false)
@@ -311,11 +310,11 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
   let (initialCmdState, cmdState, messages, trees) ← try (
     do
       match s.timeout with
-        | some timeout =>
-        let result <- IO.processInputWithTimeout (UInt32.ofNat timeout) s.cmd initialCmdState?
-        match result with
-          | Sum.inl val => return val
-          | Sum.inr err => throw err
+        | some timeout => do
+          let result <- IO.processInputWithTimeout (UInt32.ofNat timeout) s.cmd initialCmdState?
+          match result with
+            | Sum.inl val => return val
+            | Sum.inr err => throw err
         | none  => IO.processInput  s.cmd initialCmdState?
   )
   catch ex =>
@@ -367,6 +366,82 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
       sorries,
       tactics
       infotree }
+
+@[export run_json_command]
+def runJsonCommandWithTimeout (cmd : String) : M IO String := do
+  IO.print $ cmd
+  let j <- match Json.parse cmd with
+    | .error err => do
+      IO.println err
+      throw (IO.userError err)
+    | .ok val => pure val
+  let s : Command <- match Json.parse cmd >>= fromJson? with
+    | .ok (json : Command) => pure json
+    | .error err => throw <| IO.userError err
+
+  let (cmdSnapshot?, notFound) ← do match s.env with
+  | none => pure (none, false)
+  | some i => do match (← get).cmdStates[i]? with
+    | some env => pure (some env, false)
+    | none => pure (none, true)
+  if notFound then
+    return "{\"error\": \"Unknown environment.\"}"
+  let initialCmdState? := cmdSnapshot?.map fun c => c.cmdState
+  let (initialCmdState, cmdState, messages, trees) ← try (
+    do
+      match s.timeout with
+        | some timeout =>
+        let result <- IO.processInputWithTimeout (UInt32.ofNat timeout) s.cmd initialCmdState?
+        match result with
+          | Sum.inl val => return val
+          | Sum.inr err => throw err
+        | none  => IO.processInput  s.cmd initialCmdState?
+  )
+  catch ex =>
+    return ex.toString
+  let messages ← messages.mapM fun m => Message.of m
+  let messages := match s.keepEnv with
+    | some false => let msg :=  "Did not return new enviroment; returning env 0 but didn't actually make one"
+                   (Message.mk (Pos.mk 0 0) none Severity.warning msg) :: messages
+    | _          => messages
+  -- For debugging purposes, sometimes we print out the trees here:
+  -- trees.forM fun t => do IO.println (← t.format)
+  let sorries ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let sorries ← sorries trees initialCmdState.env none
+      let sorries ← match s.rootGoals with
+        | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
+        | _ => pure sorries
+  let tactics ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let tactics ← match s.allTactics with
+      | some true => tactics trees initialCmdState.env
+      | _ => pure []
+  let cmdSnapshot :=
+    { cmdState
+      cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
+        { fileName := "",
+          fileMap := default,
+          snap? := none,
+          cancelTk? := none } }
+  let env ← match s.keepEnv with
+    | some false => pure $ s.env.getD 0
+    | _          => (recordCommandSnapshot cmdSnapshot)
+
+  let jsonTrees := match s.infotree with
+  | some "full" => trees
+  | some "tactics" => trees.flatMap InfoTree.retainTacticInfo
+  | some "original" => trees.flatMap InfoTree.retainTacticInfo |>.flatMap InfoTree.retainOriginal
+  | some "substantive" => trees.flatMap InfoTree.retainTacticInfo |>.flatMap InfoTree.retainSubstantive
+  | _ => []
+  let infotree ← if jsonTrees.isEmpty then
+    pure none
+  else
+    pure <| some <| Json.arr (← jsonTrees.toArray.mapM fun t => t.toJson none)
+  let response : CommandResponse :=  { env, messages, sorries, tactics, infotree }
+  return toString $ toJson response
 
 def processFile (s : File) : M IO (CommandResponse ⊕ Error) := do
   try
