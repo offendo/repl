@@ -4,9 +4,23 @@ defaultTargets = ["repl"]
 [[lean_lib]]
 name = "REPL"
 
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.25.0-rc2"
+
+[[require]]
+name = "Cli"
+scope = "leanprover"
+
+[[require]]
+name = "Socket"
+git = "https://github.com/offendo/Socket.lean"
+rev = "v4.25.0-rc2"
+
 [[lean_exe]]
 name = "repl"
-root = "REPL.Main"
+root = "REPL"
 supportInterpreter = true
 
 [[lean_exe]]

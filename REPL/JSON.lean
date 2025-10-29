@@ -19,6 +19,7 @@ structure CommandOptions where
   Anything else is ignored.
   -/
   infotree : Option String
+  timeout : Option Nat
 
 /-- Run Lean commands.
 If `env = none`, starts a new session (in which you can use `import`).
@@ -27,6 +28,9 @@ If `env = some n`, builds on the existing environment `n`.
 structure Command extends CommandOptions where
   env : Option Nat
   cmd : String
+  keepEnv: Option Bool := some true
+  ignoreProofs : Option Bool := some false
+
 deriving ToJson, FromJson
 
 /-- Process a Lean file in a fresh environment if `env` is not provided. -/
