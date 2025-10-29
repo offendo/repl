@@ -15,7 +15,7 @@ require "leanprover" / "Cli"
 lean_lib REPL where
   defaultFacets := #[LeanLib.sharedFacet]
   buildType := Lake.BuildType.release
-  moreLeancArgs := #["-O3"]
+  moreLeancArgs := #["-O3", "-Wl,-export_dynamic"]
 
 lean_exe repl where
   root := `REPL

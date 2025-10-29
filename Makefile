@@ -9,6 +9,7 @@ all: run run-local
 lake:
 	$(LAKE) --dir=. build
 
+PROJECT_ROOT = $(shell pwd)
 OUT_DIR = out
 LEAN_SYSROOT ?= $(shell lean --print-prefix)
 LEAN_LIBDIR := $(LEAN_SYSROOT)/lib/lean
@@ -56,9 +57,27 @@ endif
 LEAN_SHLIB_ROOT := $(LEAN_LIBDIR)
 endif
 
+# 1. Compile process.c into an object
+$(OUT_DIR)/process.o: process.c
+	c++ -O3 -Wall -std=c++11 -fPIC  \
+	    $(shell python3 -m pybind11 --includes) \
+	    -I $(LEAN_SYSROOT)/include \
+			$(LINK_FLAGS_LOCAL) \
+	    -c $< -o $@
+
+# 2. Link into Python extension
+lean_process: $(OUT_DIR)/process.o
+	c++ -undefined dynamic_lookup -shared \
+	    $< \
+			-L $(PROJECT_ROOT)/.lake/build/lib \
+	    -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared -lSocket -lCli -lffi  \
+	    -o $(OUT_DIR)/lean_process$(shell python3 -m pybind11 --extension-suffix)
+
 $(OUT_DIR)/main-local: main.c lake | $(OUT_DIR)
 	cp -f $(LEAN_SHLIB_ROOT)/*.$(SHLIB_EXT) .lake/build/lib/$(SHLIB_PREFIX)REPL.$(SHLIB_EXT) $(OUT_DIR)
-	cc -O3 -o $@ $< -I $(LEAN_SYSROOT)/include -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS_LOCAL)
+	cc -O3 -o $@ $< -I $(LEAN_SYSROOT)/include -L $(PROJECT_ROOT)/.lake/build/lib -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS_LOCAL)
+	# c++ -O3 process.c -o $(OUT_DIR)/lean_process$(shell python3 -m pybind11 --extension-suffix) -undefined dynamic_lookup -Wall -shared -std=c++11 -fPIC $(shell python3 -m pybind11 --includes) -I $(LEAN_SYSROOT)/include -L $(OUT_DIR) -lREPL -lInit_shared -lleanshared_1 -lleanshared $(LINK_FLAGS_LOCAL)
+
 
 run-local: build-local
 	$(OUT_DIR)/main-local
