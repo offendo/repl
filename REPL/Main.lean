@@ -142,10 +142,10 @@ def collectRootGoalsAsSorries (trees : List InfoTree) (env? : Option Environment
 
 private def collectFVarsAux : Expr → NameSet
   | .fvar fvarId => NameSet.empty.insert fvarId.name
-  | .app fm arg => (collectFVarsAux fm).merge $ collectFVarsAux arg
-  | .lam _ binderType body _ => (collectFVarsAux binderType).merge $ collectFVarsAux body
-  | .forallE _ binderType body _ => (collectFVarsAux binderType).merge $ collectFVarsAux body
-  | .letE _ type value body _ => ((collectFVarsAux type).merge $ collectFVarsAux value).merge $ collectFVarsAux body
+  | .app fm arg => (collectFVarsAux fm).union $ collectFVarsAux arg
+  | .lam _ binderType body _ => (collectFVarsAux binderType).union $ collectFVarsAux body
+  | .forallE _ binderType body _ => (collectFVarsAux binderType).union $ collectFVarsAux body
+  | .letE _ type value body _ => ((collectFVarsAux type).union $ collectFVarsAux value).union $ collectFVarsAux body
   | .mdata _ expr => collectFVarsAux expr
   | .proj _ _ struct => collectFVarsAux struct
   | _ => NameSet.empty
@@ -186,7 +186,6 @@ def getProofStatus (proofState : ProofSnapshot) : M m String := do
       let res := proofState.runMetaM do
         match proofState.rootGoals with
         | [goalId] =>
-          goalId.withContext do
           match proofState.metaState.mctx.getExprAssignmentCore? goalId with
           | none => return "Error: Goal not assigned"
           | some pf => do
@@ -198,7 +197,7 @@ def getProofStatus (proofState : ProofSnapshot) : M m String := do
             unless (← Meta.isDefEq pft expectedType) do
               return s!"Error: proof has type {pft} but root goal has type {expectedType}"
 
-            let pf ← abstractAllLambdaFVars pf
+            let pf ← goalId.withContext $ abstractAllLambdaFVars pf
             let pft ← Meta.inferType pf >>= instantiateMVars
 
             if pf.hasExprMVar then
@@ -395,7 +394,7 @@ partial def getLines : IO String := do
   if line.trim.isEmpty then
     return line
   else
-    return line.trimRight ++ (← getLines)
+    return line ++ (← getLines)
 
 instance [ToJson α] [ToJson β] : ToJson (α ⊕ β) where
   toJson x := match x with
