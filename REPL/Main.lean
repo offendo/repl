@@ -11,6 +11,7 @@ import REPL.Lean.Environment
 import REPL.Lean.InfoTree
 import REPL.Lean.InfoTree.ToJson
 import REPL.Snapshots
+import REPL.Util.Where
 import Socket
 
 /-!
@@ -356,8 +357,12 @@ def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
     pure none
   else
     pure <| some <| Json.arr (← jsonTrees.toArray.mapM fun t => t.toJson none)
+  let (commandState, _) ←
+    cmdSnapshot.runCommandElabM do
+      (← Batteries.Tactic.Where.mkWhere).toString
   return .inl
     { env,
+      commandState,
       messages,
       sorries,
       tactics
