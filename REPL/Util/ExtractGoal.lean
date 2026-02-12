@@ -172,21 +172,25 @@ def extractGoal (g : MVarId) (cleanup := false) (name? : Option Name := none) : 
   let name ←
     match name? with
     | some name => pure name
-    | none => mkAuxName ((← getCurrNamespace) ++ `extracted) 1
+    | none => mkAuxDeclName ((← getCurrNamespace) ++ `extracted)
   withoutModifyingEnv <| withoutModifyingState <| do
     let g ← if cleanup then g.cleanup else pure g
     let (g, _) ← g.renameInaccessibleFVars
     g.withContext do
-    let fvarIds ← (← g.getDecl).lctx.getFVarIds.filterM fun fvarId => return !(← fvarId.getDecl).isAuxDecl
-    let (_, g) ← g.revert (clearAuxDeclsInsteadOfRevert := true) fvarIds
-    let ty ← instantiateMVars (← g.getType)
-    let initLevels := (collectLevelParams {} ty).params
-    let ty ← Term.TermElabM.run' (s := {levelNames := initLevels.reverse.toList}) do Term.levelMVarToParam ty
-    let e ← mkFreshExprMVar ty
-    let sig ← addMessageContext <| MessageData.lazy fun ctx => MessageData.ofFormatWithInfos <$> (ctx.runMetaM <| ppSignature' (mkIdent name) e)
-    -- let sig ← addMessageContext <| MessageData.ofFormatWithInfos { pp := fun
-    --             | some ctx => ctx.runMetaM <| ppSignature' (mkIdent name) e
-    --             | none     => unreachable!
-    --           }
-    let cmd := if ← Meta.isProp ty then "theorem" else "def"
-    addMessageContext m!"{cmd} {sig} := sorry"
+      let fvarIds ← (← g.getDecl).lctx.getFVarIds.filterM fun fvarId => return !(← fvarId.getDecl).isAuxDecl
+      let (_, g) ← g.revert (clearAuxDeclsInsteadOfRevert := true) fvarIds
+      let ty ← instantiateMVars (← g.getType)
+      let initLevels := (collectLevelParams {} ty).params
+      let ty ← Term.TermElabM.run' (s := {levelNames := initLevels.reverse.toList}) do Term.levelMVarToParam ty
+      let e ← mkFreshExprMVar ty
+      let sig ← addMessageContext <|
+        MessageData.ofFormatWithInfosM do
+          ppSignature' (mkIdent name) e
+
+      -- let sig ← addMessageContext <| MessageData.lazy fun ctx => MessageData.ofFormatWithInfosM <$> (ctx.runMetaM <| ppSignature' (mkIdent name) e)
+      -- let sig ← addMessageContext <| MessageData.ofFormatWithInfos { pp := fun
+      --             | some ctx => ctx.runMetaM <| ppSignature' (mkIdent name) e
+      --             | none     => unreachable!
+      --           }
+      let cmd := if ← Meta.isProp ty then "theorem" else "def"
+      addMessageContext m!"{cmd} {sig} := sorry"

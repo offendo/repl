@@ -131,7 +131,6 @@ structure CommandResponse where
   env : Nat
   commandState : String := ""
   messages : List Message := []
-  commandState : String := ""
   sorries : List Sorry := []
   tactics : List Tactic := []
   infotree : Option Json := none
