@@ -13,11 +13,13 @@ namespace REPL
 
 structure CommandOptions where
   allTactics : Option Bool := none
+  rootGoals : Option Bool := none
   /--
   Should be "full", "tactics", "original", or "substantive".
   Anything else is ignored.
   -/
   infotree : Option String
+  timeout : Option Nat
 
 /-- Run Lean commands.
 If `env = none`, starts a new session (in which you can use `import`).
@@ -26,12 +28,16 @@ If `env = some n`, builds on the existing environment `n`.
 structure Command extends CommandOptions where
   env : Option Nat
   cmd : String
+  keepEnv: Option Bool := some true
+  ignoreProofs : Option Bool := some false
+
 deriving ToJson, FromJson
 
-/-- Process a Lean file in a fresh environment. -/
+/-- Process a Lean file in a fresh environment if `env` is not provided. -/
 structure File extends CommandOptions where
+  env : Option Nat
   path : System.FilePath
-deriving FromJson
+deriving ToJson, FromJson
 
 /--
 Run a tactic in a proof state.
@@ -125,6 +131,7 @@ structure CommandResponse where
   env : Nat
   commandState : String := ""
   messages : List Message := []
+  commandState : String := ""
   sorries : List Sorry := []
   tactics : List Tactic := []
   infotree : Option Json := none
@@ -153,6 +160,7 @@ structure ProofStepResponse where
   messages : List Message := []
   sorries : List Sorry := []
   traces : List String
+  proofStatus : String
 deriving ToJson, FromJson
 
 instance : ToJson ProofStepResponse where
@@ -161,7 +169,8 @@ instance : ToJson ProofStepResponse where
     [("goals", toJson r.goals)],
     Json.nonemptyList "messages" r.messages,
     Json.nonemptyList "sorries" r.sorries,
-    Json.nonemptyList "traces" r.traces
+    Json.nonemptyList "traces" r.traces,
+    [("proofStatus", r.proofStatus)]
   ]
 
 /-- Json wrapper for an error. -/

@@ -4,6 +4,7 @@ Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Scott Morrison
 -/
 import Lean.Elab.Frontend
+import REPL.Timeout
 
 open Lean Elab
 
@@ -22,18 +23,44 @@ def processCommandsWithInfoTrees
   let s ← IO.processCommands inputCtx parserState commandState <&> Frontend.State.commandState
   pure (s, s.messages.toList, s.infoState.trees.toList)
 
+/--
+Process some text input, with or without an existing command state.
+If there is no existing environment, we parse the input for headers (e.g. import statements),
+and create a new environment.
+Otherwise, we add to the existing environment.
+
+Returns:
+1. The header-only command state (only useful when cmdState? is none)
+2. The resulting command state after processing the entire input
+3. List of messages
+4. List of info trees
+-/
 def processInput (input : String) (cmdState? : Option Command.State)
     (opts : Options := {}) (fileName : Option String := none) :
-    IO (Command.State × List Message × List InfoTree) := unsafe do
+    IO (Command.State × Command.State × List Message × List InfoTree) := unsafe do
   Lean.initSearchPath (← Lean.findSysroot)
   enableInitializersExecution
   let fileName   := fileName.getD "<input>"
   let inputCtx   := Parser.mkInputContext input fileName
-  let (parserState, commandState) ← match cmdState? with
+
+  match cmdState? with
   | none => do
+    -- Split the processing into two phases to prevent self-reference in proofs in tactic mode
     let (header, parserState, messages) ← Parser.parseHeader inputCtx
     let (env, messages) ← processHeader header opts messages inputCtx
-    pure (parserState, (Command.mkState env messages opts))
-  | some cmdState => do
-    pure ({ : Parser.ModuleParserState }, cmdState)
-  processCommandsWithInfoTrees inputCtx parserState commandState
+    let headerOnlyState := Command.mkState env messages opts
+    let (cmdState, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState headerOnlyState
+    return (headerOnlyState, cmdState, messages, trees)
+
+  | some cmdStateBefore => do
+    let parserState : Parser.ModuleParserState := {}
+    let (cmdStateAfter, messages, trees) ← processCommandsWithInfoTrees inputCtx parserState cmdStateBefore
+    return (cmdStateBefore, cmdStateAfter, messages, trees)
+
+def processInputWithTimeout (timeout : UInt32) (input : String) (cmdState? : Option Command.State)
+    (opts : Options := {}) (fileName : Option String := none) :
+    IO ((Command.State × Command.State × List Message × List InfoTree) ⊕ IO.Error) :=
+    do
+      let func := fun () => processInput input cmdState? opts fileName
+      let result <- runWithTimeout func timeout Task.Priority.dedicated
+      return result

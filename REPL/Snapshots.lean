@@ -83,7 +83,7 @@ def unpickle (path : FilePath) : IO (CommandSnapshot × CompactedRegion) := unsa
   let ((imports, map₂, cmdState, cmdContext), region) ←
     _root_.unpickle (Array Import × PHashMap Name ConstantInfo × CompactableCommandSnapshot ×
       Command.Context) path
-  let env ← (← importModules imports {} 0).replay (Std.HashMap.ofList map₂.toList)
+  let env ← (← importModules imports {} 0 (loadExts := true)).replay (Std.HashMap.ofList map₂.toList)
   let p' : CommandSnapshot :=
   { cmdState := { cmdState with env }
     cmdContext }
@@ -108,6 +108,7 @@ structure ProofSnapshot where
   termContext   : Term.Context
   tacticState   : Tactic.State
   tacticContext : Tactic.Context
+  rootGoals     : List MVarId
 
 namespace ProofSnapshot
 
@@ -191,7 +192,8 @@ For convenience, we also allow a list of `Expr`s, and these are appended to the 
 as fresh metavariables with the given types.
 -/
 def create (ctx : ContextInfo) (lctx? : Option LocalContext) (env? : Option Environment)
-    (goals : List MVarId) (types : List Expr := []) : IO ProofSnapshot := do
+    (goals : List MVarId) (rootGoals? : Option (List MVarId)) (types : List Expr := [])
+    : IO ProofSnapshot := do
   ctx.runMetaM (lctx?.getD {}) do
     let goals := goals ++ (← types.mapM fun t => Expr.mvarId! <$> Meta.mkFreshExprMVar (some t))
     let s ← getThe Core.State
@@ -206,7 +208,10 @@ def create (ctx : ContextInfo) (lctx? : Option LocalContext) (env? : Option Envi
       termState := {}
       termContext := {}
       tacticState := { goals }
-      tacticContext := { elaborator := .anonymous } }
+      tacticContext := { elaborator := .anonymous }
+      rootGoals := match rootGoals? with
+        | none => goals
+        | some gs => gs }
 
 open Lean.Core in
 /-- A copy of `Core.State` with the `Environment`, caches, and logging omitted. -/
@@ -259,29 +264,31 @@ When pickling the `Environment`, we do so relative to its imports.
 def pickle (p : ProofSnapshot) (path : FilePath) : IO Unit := do
   let env := p.coreState.env
   let p' := { p with coreState := { p.coreState with env := ← mkEmptyEnvironment }}
+  let (cfg, _) ← Lean.Meta.getConfig.toIO p'.coreContext p'.coreState p'.metaContext p'.metaState
   _root_.pickle path
     (env.header.imports,
      env.constants.map₂,
      ({ p'.coreState with } : CompactableCoreState),
      p'.coreContext,
      p'.metaState,
-     ({ p'.metaContext with } : CompactableMetaContext),
+     ({ p'.metaContext with config := cfg } : CompactableMetaContext),
      p'.termState,
      ({ p'.termContext with } : CompactableTermContext),
      p'.tacticState,
-     p'.tacticContext)
+     p'.tacticContext,
+     p'.rootGoals)
 
 def unpickle (path : FilePath) (cmd? : Option CommandSnapshot) :
     IO (ProofSnapshot × CompactedRegion) := unsafe do
   let ((imports, map₂, coreState, coreContext, metaState, metaContext, termState, termContext,
-    tacticState, tacticContext), region) ←
+    tacticState, tacticContext, rootGoals), region) ←
     _root_.unpickle (Array Import × PHashMap Name ConstantInfo × CompactableCoreState ×
       Core.Context × Meta.State × CompactableMetaContext × Term.State × CompactableTermContext ×
-      Tactic.State × Tactic.Context) path
+      Tactic.State × Tactic.Context × List MVarId) path
   let env ← match cmd? with
   | none =>
     enableInitializersExecution
-    (← importModules imports {} 0).replay (Std.HashMap.ofList map₂.toList)
+    (← importModules imports {} 0 (loadExts := true)).replay (Std.HashMap.ofList map₂.toList)
   | some cmd =>
     cmd.cmdState.env.replay (Std.HashMap.ofList map₂.toList)
   let p' : ProofSnapshot :=
@@ -292,7 +299,8 @@ def unpickle (path : FilePath) (cmd? : Option CommandSnapshot) :
     termState
     termContext := { termContext with }
     tacticState
-    tacticContext }
+    tacticContext
+    rootGoals }
   let (_, p'') ← p'.runCoreM do
     for o in ← getOpenDecls do
       if let .simple ns _ := o then

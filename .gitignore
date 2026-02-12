@@ -6,3 +6,4 @@
 /test/*.olean
 /test/*.olean.tmp
 /.lake
+/test/*.produced.out

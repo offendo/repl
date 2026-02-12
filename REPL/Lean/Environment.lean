@@ -1,3 +1,8 @@
+/-
+Copyright (c) 2023 Kim Morrison. All Rights Reserved.
+Released under Apache 2.0 license as described in the file LICENSE.
+Authors: Kim Morrison
+-/
 import REPL.Util.Pickle
 import Lean.Replay
 
@@ -25,7 +30,7 @@ and then replace the new constants.
 -/
 def unpickle (path : FilePath) : IO (Environment × CompactedRegion) := unsafe do
   let ((imports, map₂), region) ← _root_.unpickle (Array Import × PHashMap Name ConstantInfo) path
-  let env ← importModules imports {} 0
+  let env ← importModules imports {} 0 (loadExts := true) 
   return (← env.replay (Std.HashMap.ofList map₂.toList), region)
 
 end Lean.Environment

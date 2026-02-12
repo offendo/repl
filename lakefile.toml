@@ -7,9 +7,23 @@ name = "REPL"
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.14.0-rc1"
+rev = "v4.24.0"
+
+[[require]]
+name = "Cli"
+rev = "v4.24.0"
+scope = "leanprover"
+
+[[require]]
+name = "Socket"
+git = "https://github.com/offendo/Socket.lean"
+rev = "v4.24.0"
 
 [[lean_exe]]
 name = "repl"
-root = "REPL.Main"
+root = "REPL"
 supportInterpreter = true
+
+[[lean_exe]]
+name = "test"
+root = "Test"

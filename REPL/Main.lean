@@ -13,6 +13,7 @@ import REPL.Lean.InfoTree.ToJson
 import REPL.Snapshots
 import REPL.Util.ExtractGoal
 import REPL.Util.Where
+import Socket
 
 /-!
 # A REPL for Lean.
@@ -96,18 +97,23 @@ def recordProofSnapshot (proofState : ProofSnapshot) : M m Nat := do
   modify fun s => { s with proofStates := s.proofStates.push proofState }
   return id
 
-def sorries (trees : List InfoTree) (env? : Option Environment) : M m (List Sorry) :=
+def sorries (trees : List InfoTree) (env? : Option Environment) (rootGoals? : Option (List MVarId))
+: M m (List Sorry) :=
   trees.flatMap InfoTree.sorries |>.filter (fun t => match t.2.1 with
     | .term _ none => false
     | _ => true ) |>.mapM
       fun ⟨ctx, g, pos, endPos⟩ => do
         let (goal, proofState) ← match g with
         | .tactic g => do
-           let s ← ProofSnapshot.create ctx none env? [g]
-           pure ("\n".intercalate <| (← s.ppGoals).map fun s => s!"{s}", some s)
+          let lctx ← ctx.runMetaM {} do
+              match ctx.mctx.findDecl? g with
+              | some decl => return decl.lctx
+              | none => throwError "unknown metavariable '{g}'"
+          let s ← ProofSnapshot.create ctx lctx env? [g] rootGoals?
+          pure ("\n".intercalate <| (← s.ppGoals).map fun s => s!"{s}", some s)
         | .term lctx (some t) => do
-           let s ← ProofSnapshot.create ctx lctx env? [] [t]
-           pure ("\n".intercalate <| (← s.ppGoals).map fun s => s!"{s}", some s)
+          let s ← ProofSnapshot.create ctx lctx env? [] rootGoals? [t]
+          pure ("\n".intercalate <| (← s.ppGoals).map fun s => s!"{s}", some s)
         | .term _ none => unreachable!
         let proofStateId ← proofState.mapM recordProofSnapshot
         return Sorry.of goal pos endPos proofStateId
@@ -118,10 +124,10 @@ def ppTactic (ctx : ContextInfo) (stx : Syntax) : IO Format :=
   catch _ =>
     pure "<failed to pretty print>"
 
-def tactics (trees : List InfoTree) : M m (List Tactic) :=
+def tactics (trees : List InfoTree) (env? : Option Environment) : M m (List Tactic) :=
   trees.flatMap InfoTree.tactics |>.mapM
-    fun ⟨ctx, stx, goals, pos, endPos, ns⟩ => do
-      let proofState := some (← ProofSnapshot.create ctx none none goals)
+    fun ⟨ctx, stx, rootGoals, goals, pos, endPos, ns⟩ => do
+      let proofState := some (← ProofSnapshot.create ctx none env? goals rootGoals)
       let goals' := s!"{(← ctx.ppGoals goals)}".trim
       let extracted : Array String ← ctx.runMetaM {} do
         let mut extracted : Array String := #[]
@@ -136,6 +142,106 @@ def tactics (trees : List InfoTree) : M m (List Tactic) :=
       let tactic := Format.pretty (← ppTactic ctx stx)
       let proofStateId ← proofState.mapM recordProofSnapshot
       return Tactic.of goals' tactic extracted pos endPos proofStateId ns
+
+def collectRootGoalsAsSorries (trees : List InfoTree) (env? : Option Environment) : M m (List Sorry) := do
+  trees.flatMap InfoTree.rootGoals |>.mapM
+    fun ⟨ctx, goals, pos⟩ => do
+      let proofState := some (← ProofSnapshot.create ctx none env? goals goals)
+      let goals := s!"{(← ctx.ppGoals goals)}".trim
+      let proofStateId ← proofState.mapM recordProofSnapshot
+      return Sorry.of goals pos pos proofStateId
+
+
+private def collectFVarsAux : Expr → NameSet
+  | .fvar fvarId => NameSet.empty.insert fvarId.name
+  | .app fm arg => (collectFVarsAux fm).merge $ collectFVarsAux arg
+  | .lam _ binderType body _ => (collectFVarsAux binderType).merge $ collectFVarsAux body
+  | .forallE _ binderType body _ => (collectFVarsAux binderType).merge $ collectFVarsAux body
+  | .letE _ type value body _ => ((collectFVarsAux type).merge $ collectFVarsAux value).merge $ collectFVarsAux body
+  | .mdata _ expr => collectFVarsAux expr
+  | .proj _ _ struct => collectFVarsAux struct
+  | _ => NameSet.empty
+
+/-- Collect all fvars in the expression, and return their names. -/
+private def collectFVars (e : Expr) : MetaM (Array Expr) := do
+  let names := collectFVarsAux e
+  let mut fvars := #[]
+  for ldecl in ← getLCtx do
+    if ldecl.isImplementationDetail then
+      continue
+    if names.contains ldecl.fvarId.name then
+      fvars := fvars.push $ .fvar ldecl.fvarId
+  return fvars
+
+
+private def abstractAllLambdaFVars (e : Expr) : MetaM Expr := do
+  let mut e' := e
+  while e'.hasFVar do
+    let fvars ← collectFVars e'
+    if fvars.isEmpty then
+      break
+    e' ← Meta.mkLambdaFVars fvars e'
+  return e'
+
+/--
+Evaluates the current status of a proof, returning a string description.
+Main states include:
+- "Completed": Proof is complete and type checks successfully
+- "Incomplete": When goals remain, or proof contains sorry/metavariables
+- "Error": When kernel type checking errors occur
+
+Inspired by LeanDojo REPL's status tracking.
+-/
+def getProofStatus (proofState : ProofSnapshot) : M m String := do
+  match proofState.tacticState.goals with
+    | [] =>
+      let res := proofState.runMetaM do
+        match proofState.rootGoals with
+        | [goalId] =>
+          goalId.withContext do
+          match proofState.metaState.mctx.getExprAssignmentCore? goalId with
+          | none => return "Error: Goal not assigned"
+          | some pf => do
+            let pf ← instantiateMVars pf
+
+            -- First check that the proof has the expected type
+            let pft ← Meta.inferType pf >>= instantiateMVars
+            let expectedType ← Meta.inferType (mkMVar goalId) >>= instantiateMVars
+            unless (← Meta.isDefEq pft expectedType) do
+              return s!"Error: proof has type {pft} but root goal has type {expectedType}"
+
+            let pf ← abstractAllLambdaFVars pf
+            let pft ← Meta.inferType pf >>= instantiateMVars
+
+            if pf.hasExprMVar then
+              return "Incomplete: contains metavariable(s)"
+
+            -- Find all level parameters
+            let usedLevels := collectLevelParams {} pft
+            let usedLevels := collectLevelParams usedLevels pf
+
+            let decl := Declaration.defnDecl {
+              name := Name.anonymous,
+              type := pft,
+              value := pf,
+              levelParams := usedLevels.params.toList,
+              hints := ReducibilityHints.opaque,
+              safety := DefinitionSafety.safe
+            }
+
+            try
+              let _ ← addDecl decl
+            catch ex =>
+              return s!"Error: kernel type check failed: {← ex.toMessageData.toString}"
+
+            if pf.hasSorry then
+              return "Incomplete: contains sorry"
+            return "Completed"
+
+        | _ => return "Not verified: more than one initial goal"
+      return (← res).fst
+
+    | _ => return "Incomplete: open goals remain"
 
 /-- Record a `ProofSnapshot` and generate a JSON response for it. -/
 def createProofStepReponse (proofState : ProofSnapshot) (old? : Option ProofSnapshot := none) :
@@ -152,14 +258,15 @@ def createProofStepReponse (proofState : ProofSnapshot) (old? : Option ProofSnap
   | none => pure trees
   -- For debugging purposes, sometimes we print out the trees here:
   -- trees.forM fun t => do IO.println (← t.format)
-  let sorries ← sorries trees none
+  let sorries ← sorries trees none (some proofState.rootGoals)
   let id ← recordProofSnapshot proofState
   return {
     proofState := id
     goals := (← proofState.ppGoals).map fun s => s!"{s}"
     messages
     sorries
-    traces }
+    traces
+    proofStatus := (← getProofStatus proofState) }
 
 /-- Pickle a `CommandSnapshot`, generating a JSON response. -/
 def pickleCommandSnapshot (n : PickleEnvironment) : M m (CommandResponse ⊕ Error) := do
@@ -199,7 +306,7 @@ def unpickleProofSnapshot (n : UnpickleProofState) : M IO (ProofStepResponse ⊕
 /--
 Run a command, returning the id of the new environment, and any messages and sorries.
 -/
-def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
+def runCommandWithTimeout (s : Command) : M IO (CommandResponse ⊕ Error) := do
   let (cmdSnapshot?, notFound) ← do match s.env with
     | none => pure (none, false)
     | some i => do match (← get).cmdStates[i]? with
@@ -208,26 +315,49 @@ def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
   if notFound then
     return .inr ⟨"Unknown environment."⟩
   let initialCmdState? := cmdSnapshot?.map fun c => c.cmdState
-  let (cmdState, messages, trees) ← try
-    IO.processInput s.cmd initialCmdState?
+  let (initialCmdState, cmdState, messages, trees) ← try (
+    do
+      match s.timeout with
+        | some timeout =>
+        let result <- IO.processInputWithTimeout (UInt32.ofNat timeout) s.cmd initialCmdState?
+        match result with
+          | Sum.inl val => return val
+          | Sum.inr err => throw err
+        | none  => IO.processInput  s.cmd initialCmdState?
+  )
   catch ex =>
     return .inr ⟨ex.toString⟩
   let messages ← messages.mapM fun m => Message.of m
+  let messages := match s.keepEnv with
+    | some false => let msg :=  "Did not return new enviroment; returning env 0 but didn't actually make one"
+                   (Message.mk (Pos.mk 0 0) none Severity.warning msg) :: messages
+    | _          => messages
   -- For debugging purposes, sometimes we print out the trees here:
   -- trees.forM fun t => do IO.println (← t.format)
-  let sorries ← sorries trees (initialCmdState?.map (·.env))
-  let tactics ← match s.allTactics with
-  | some true => tactics trees
-  | _ => pure []
+  let sorries ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let sorries ← sorries trees initialCmdState.env none
+      let sorries ← match s.rootGoals with
+        | some true => pure (sorries ++ (← collectRootGoalsAsSorries trees initialCmdState.env))
+        | _ => pure sorries
+  let tactics ← match s.ignoreProofs with
+    | some true => pure []
+    | _ => do
+      let tactics ← match s.allTactics with
+      | some true => tactics trees initialCmdState.env
+      | _ => pure []
   let cmdSnapshot :=
-  { cmdState
-    cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
-      { fileName := "",
-        fileMap := default,
-        tacticCache? := none,
-        snap? := none,
-        cancelTk? := none } }
-  let env ← recordCommandSnapshot cmdSnapshot
+    { cmdState
+      cmdContext := (cmdSnapshot?.map fun c => c.cmdContext).getD
+        { fileName := "",
+          fileMap := default,
+          snap? := none,
+          cancelTk? := none } }
+  let env ← match s.keepEnv with
+    | some false => pure $ s.env.getD 0
+    | _          => (recordCommandSnapshot cmdSnapshot)
+
   let jsonTrees := match s.infotree with
   | some "full" => trees
   | some "tactics" => trees.flatMap InfoTree.retainTacticInfo
@@ -252,7 +382,7 @@ def runCommand (s : Command) : M IO (CommandResponse ⊕ Error) := do
 def processFile (s : File) : M IO (CommandResponse ⊕ Error) := do
   try
     let cmd ← IO.FS.readFile s.path
-    runCommand { s with env := none, cmd }
+    runCommandWithTimeout { s with env := none, cmd }
   catch e =>
     pure <| .inr ⟨e.toString⟩
 
@@ -276,11 +406,12 @@ open REPL
 
 /-- Get lines from stdin until a blank line is entered. -/
 partial def getLines : IO String := do
+  IO.print "λ "
   let line ← (← IO.getStdin).getLine
   if line.trim.isEmpty then
     return line
   else
-    return line ++ (← getLines)
+    return line.trimRight ++ (← getLines)
 
 instance [ToJson α] [ToJson β] : ToJson (α ⊕ β) where
   toJson x := match x with
@@ -327,15 +458,22 @@ def printFlush [ToString α] (s : α) : IO Unit := do
   out.flush -- Flush the output
 
 /-- Read-eval-print loop for Lean. -/
-unsafe def repl : IO Unit :=
+unsafe def repl : IO Unit := do
+  -- Print a little header
+  let version := List.getLast! <| String.splitOn ((<- IO.getEnv "ELAN_TOOLCHAIN").getD "unknown:unknown") ":"
+  let header := s!"Lean REPL ({version})"
+  let underline := String.map (fun _ => '=') header
+  IO.println s!"{header}\n{underline}"
+  -- Now do the loop
   StateT.run' loop {}
-where loop : M IO Unit := do
+where
+  loop : M IO Unit := do
   let query ← getLines
   if query = "" then
     return ()
   if query.startsWith "#" || query.startsWith "--" then loop else
   IO.println <| toString <| ← match ← parse query with
-  | .command r => return toJson (← runCommand r)
+  | .command r => return toJson (← runCommandWithTimeout r)
   | .file r => return toJson (← processFile r)
   | .proofStep r => return toJson (← runProofStep r)
   | .pickleEnvironment r => return toJson (← pickleCommandSnapshot r)
@@ -345,7 +483,41 @@ where loop : M IO Unit := do
   printFlush "\n" -- easier to parse the output if there are blank lines
   loop
 
-/-- Main executable function, run as `lake exe repl`. -/
-unsafe def main (_ : List String) : IO Unit := do
-  initSearchPath (← Lean.findSysroot)
-  repl
+open Socket
+partial def tcpRepl (port : Nat) : IO Unit := do
+    let address ←  SockAddr.mk "localhost" (toString port) AddressFamily.inet SockType.stream
+    let socket ← Socket.mk AddressFamily.inet SockType.stream
+    socket.bind address
+    socket.listen 5
+    IO.println s!"Started TCP server; listening on port {port}"
+    serve socket
+  where
+    communicate (addr : SockAddr) (socket' : Socket) : M IO Unit := do
+      let query <- String.fromUTF8! <$> socket'.recv 65536
+      let tid ←  IO.getTID
+      match query.length with
+      -- End the server
+        | Nat.zero => do
+          let host := addr.host.getD "??"
+          let port := addr.port.getD 0
+          IO.println s!"Closing connection to {host}:{port}; ending thread {tid}"
+          socket'.close
+          return ()
+      -- Loop the server
+        | _ => do
+          let response := toString <| ← match (← parse query) with
+            | .command r => return toJson (← runCommandWithTimeout r)
+            | .file r => return toJson (← processFile r)
+            | .proofStep r => return toJson (← runProofStep r)
+            | .pickleEnvironment r => return toJson (← pickleCommandSnapshot r)
+            | .unpickleEnvironment r => return toJson (← unpickleCommandSnapshot r)
+            | .pickleProofSnapshot r => return toJson (← pickleProofSnapshot r)
+            | .unpickleProofSnapshot r => return toJson (← unpickleProofSnapshot r)
+          let bytesSend ← socket'.send response.toUTF8
+          IO.println s!"Sent back {bytesSend} bytes"
+          communicate addr socket'
+    serve (socket : Socket) : IO Unit := do
+      repeat do
+        let (remoteAddr, socket') ←  socket.accept
+        IO.println s!"Connected to {remoteAddr}"
+        let _ ←  IO.asTask (StateT.run' (communicate remoteAddr socket') {}) (Task.Priority.dedicated)

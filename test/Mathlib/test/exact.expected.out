@@ -12,12 +12,13 @@
    "data": "declaration uses 'sorry'"}],
  "env": 1}
 
-{"proofState": 1,
+{"proofStatus": "Completed",
+ "proofState": 1,
  "messages":
  [{"severity": "info",
    "pos": {"line": 0, "column": 0},
    "endPos": {"line": 0, "column": 0},
-   "data": "Try this: exact Nat.one_pos"}],
+   "data": "Try this:\n  [apply] exact Nat.one_pos"}],
  "goals": []}
 
 {"sorries":
