@@ -140,8 +140,7 @@ def tactics (trees : List InfoTree) (env? : Option Environment) : M m (List Tact
               pure s!"failed: {← ex.toMessageData.toString}"
           extracted := extracted.push (← goal'.toString)
         pure extracted
-      -- let tactic := Format.pretty (← ppTactic ctx stx)
-      let tactic := toString (← ppTactic ctx stx)
+      let tactic := Format.pretty (← ppTactic ctx stx)
       let proofStateId ← proofState.mapM recordProofSnapshot
       return Tactic.of goals' tactic extracted pos endPos proofStateId ns
 
