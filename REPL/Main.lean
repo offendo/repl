@@ -131,10 +131,11 @@ def tactics (trees : List InfoTree) (env? : Option Environment) : M m (List Tact
       let goals' := s!"{(← ctx.ppGoals goals)}".trim
       let extracted : Array String ← ctx.runMetaM {} do
         let mut extracted : Array String := #[]
-        for goal in goals do
+        for i in [:goals.length] do
+          let goal := goals[i]!
           let goal' ←
             try
-              REPL.Util.extractGoal goal (cleanup := false)
+              REPL.Util.extractGoal goal (cleanup := false) s!"goal_{i}".toName
             catch ex =>
               pure s!"failed: {← ex.toMessageData.toString}"
           extracted := extracted.push (← goal'.toString)
