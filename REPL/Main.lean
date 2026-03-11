@@ -421,6 +421,7 @@ instance [ToJson α] [ToJson β] : ToJson (α ⊕ β) where
 
 /-- Commands accepted by the REPL. -/
 inductive Input
+| empty : Input
 | command : REPL.Command → Input
 | file : REPL.File → Input
 | proofStep : REPL.ProofStep → Input
@@ -429,8 +430,22 @@ inductive Input
 | pickleProofSnapshot : REPL.PickleProofState → Input
 | unpickleProofSnapshot : REPL.UnpickleProofState → Input
 
+instance : ToString Input where
+  toString x := match x with
+  | .empty => "<empty input>"
+  | .command _ => "<command input>"
+  | .file _ => "<file input>"
+  | .proofStep _ => "<proof step input>"
+  | .pickleEnvironment _ => "<pickle environment input>"
+  | .unpickleEnvironment _ => "<unpickle environment input>"
+  | .pickleProofSnapshot _ => "<pickle proof snapshot input>"
+  | .unpickleProofSnapshot _ => "<unpickle proof snapshot input>"
+
 /-- Parse a user input string to an input command. -/
 def parse (query : String) : IO Input := do
+  if query.length == 0 then
+    return .empty
+
   let json := Json.parse query
   match json with
   | .error e => throw <| IO.userError <| toString <| toJson <|
@@ -474,6 +489,7 @@ where
     return ()
   if query.startsWith "#" || query.startsWith "--" then loop else
   IO.println <| toString <| ← match ← parse query with
+  | .empty => return Json.null
   | .command r => return toJson (← runCommandWithTimeout r)
   | .file r => return toJson (← processFile r)
   | .proofStep r => return toJson (← runProofStep r)
@@ -485,6 +501,31 @@ where
   loop
 
 open Socket
+
+
+/-- Grab a query from the socket until it is complete or the gas runs out. -/
+def grabQueryUntilDone' (gas : Nat) (socket': Socket) (prev: String := "") : M IO Input := do
+  match gas with
+    | Nat.zero => do
+      throw <| IO.userError "Query too long"
+    | Nat.succ n => do
+      let newQuery <- String.fromUTF8! <$> socket'.recv 1000000
+      IO.println s!"Received {newQuery.length} bytes from socket"
+      if newQuery.trim.isEmpty then
+         return (← parse prev)
+      else
+        let query := String.join [prev, newQuery]
+        try
+          let input <- parse query
+          return input
+        catch e =>
+          return (← grabQueryUntilDone' n socket' query)
+
+/-- Can recieve up to 1B bytes -/
+def grabQueryUntilDone (socket': Socket) : M IO Input := do
+  -- We use a gas parameter to avoid waiting forever if the client never sends a complete query.
+  grabQueryUntilDone' 1000 socket' ""
+
 partial def tcpRepl (port : Nat) : IO Unit := do
     let address ←  SockAddr.mk "localhost" (toString port) AddressFamily.inet SockType.stream
     let socket ← Socket.mk AddressFamily.inet SockType.stream
@@ -494,19 +535,19 @@ partial def tcpRepl (port : Nat) : IO Unit := do
     serve socket
   where
     communicate (addr : SockAddr) (socket' : Socket) : M IO Unit := do
-      let query <- String.fromUTF8! <$> socket'.recv 65536
-      let tid ←  IO.getTID
-      match query.length with
-      -- End the server
-        | Nat.zero => do
-          let host := addr.host.getD "??"
-          let port := addr.port.getD 0
-          IO.println s!"Closing connection to {host}:{port}; ending thread {tid}"
-          socket'.close
-          return ()
-      -- Loop the server
+      let host := addr.host.getD "??"
+      let port := addr.port.getD 0
+      IO.println s!"Waiting for input from {host}:{port}..."
+      let input <- grabQueryUntilDone socket'
+      match input with
+        | .empty => do
+            let tid ←  IO.getTID
+            IO.println s!"Closing connection to {host}:{port}; ending thread {tid}"
+            socket'.close
+            return ()
         | _ => do
-          let response := toString <| ← match (← parse query) with
+          let response := toString <| ← match input with
+            | .empty => return Json.null
             | .command r => return toJson (← runCommandWithTimeout r)
             | .file r => return toJson (← processFile r)
             | .proofStep r => return toJson (← runProofStep r)
@@ -515,7 +556,7 @@ partial def tcpRepl (port : Nat) : IO Unit := do
             | .pickleProofSnapshot r => return toJson (← pickleProofSnapshot r)
             | .unpickleProofSnapshot r => return toJson (← unpickleProofSnapshot r)
           let bytesSend ← socket'.send response.toUTF8
-          IO.println s!"Sent back {bytesSend} bytes"
+          IO.println s!"Sent back {bytesSend} bytes after processing {toString input}"
           communicate addr socket'
     serve (socket : Socket) : IO Unit := do
       repeat do
